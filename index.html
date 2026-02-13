@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>ByteCode - Lightning Marketplace</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- React and Babel -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- QR Code Generator -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+        }
+        .fade-in {
+            animation: fadeIn 0.6s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .card-bg-dark {
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid #334155;
+            border-radius: 1.5rem;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        .card-bg-dark:hover {
+            border-color: #fbbf24;
+            box-shadow: 0 0 30px rgba(251, 191, 36, 0.2);
+            transform: translateY(-5px);
+        }
+        .btn-glow {
+            transition: all 0.3s ease;
+        }
+        .btn-glow:hover {
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.5);
+        }
+        .qr-container {
+            background: white;
+            padding: 1rem;
+            border-radius: 1rem;
+            display: inline-block;
+        }
+        .loading-spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 3px solid #fbbf24;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-white">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [cart, setCart] = useState([]);
+            const [showQR, setShowQR] = useState(false);
+            const [invoice, setInvoice] = useState("");
+            const [paymentHash, setPaymentHash] = useState("");
+            const [showRegister, setShowRegister] = useState(false);
+            const [creditScore, setCreditScore] = useState(0);
+            const [backendStatus, setBackendStatus] = useState('checking');
+            const [walletBalance, setWalletBalance] = useState(0);
+            const [channelBalance, setChannelBalance] = useState(0);
+            
+            const API_BASE = 'http://127.0.0.1:5000';
+            const BUSINESS_NAME = 'ByteCode';
+            
+            const products = [
+                {id: 1, name: "🎧 Premium Headphones", price: 12000, price_usd: 120, desc: "Noise cancelling, wireless"},
+                {id: 2, name: "⌚ Smart Watch", price: 25000, price_usd: 250, desc: "Fitness tracker, notifications"},
+                {id: 3, name: "💻 Gaming Laptop", price: 150000, price_usd: 1500, desc: "RTX 4060, 16GB RAM"},
+                {id: 4, name: "🔊 Bluetooth Speaker", price: 18000, price_usd: 180, desc: "360° sound, waterproof"}
+            ];
+
+            // Check backend health on load
+            useEffect(() => {
+                checkBackendHealth();
+                
+                // Load credit score from localStorage
+                const txs = JSON.parse(localStorage.getItem('bytecode_transactions') || '[]');
+                setCreditScore(Math.min(100, txs.length * 10));
+                
+                // Load cart from localStorage
+                const savedCart = JSON.parse(localStorage.getItem('bytecode_cart') || '[]');
+                setCart(savedCart);
+            }, []);
+
+            // Save cart to localStorage whenever it changes
+            useEffect(() => {
+                localStorage.setItem('bytecode_cart', JSON.stringify(cart));
+            }, [cart]);
+
+            const checkBackendHealth = async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/api/health`);
+                    const data = await response.json();
+                    if (data.status === 'online') {
+                        setBackendStatus('online');
+                        console.log(`✅ Connected to ${data.business} backend`);
+                        
+                        // Get lightning balance
+                        const balanceRes = await fetch(`${API_BASE}/api/lightning/balance`);
+                        const balanceData = await balanceRes.json();
+                        if (balanceData.success) {
+                            setWalletBalance(balanceData.wallet_balance);
+                            setChannelBalance(balanceData.channel_balance);
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ Backend not running:', error);
+                    setBackendStatus('offline');
+                }
+            };
+
+            const addToCart = (product) => {
+                setCart([...cart, product]);
+                // Show feedback
+                const btn = event.target;
+                btn.innerHTML = '✓ Added!';
+                setTimeout(() => {
+                    btn.innerHTML = 'Add to Cart';
+                }, 1000);
+            };
+
+            const removeFromCart = (index) => {
+                const newCart = [...cart];
+                newCart.splice(index, 1);
+                setCart(newCart);
+            };
+
+            const total = cart.reduce((sum, item) => sum + item.price, 0);
+            const totalUSD = cart.reduce((sum, item) => sum + item.price_usd, 0);
+
+            const checkout = async () => {
+                if (backendStatus !== 'online') {
+                    alert('❌ Backend is not running. Please start the Flask server.');
+                    return;
+                }
+                
+                if (total === 0) {
+                    alert('🛒 Your cart is empty!');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/lightning/invoice`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            amount: total,
+                            description: `ByteCode - ${cart.length} items`
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        setInvoice(data.payment_request);
+                        setPaymentHash(data.payment_hash);
+                        setShowQR(true);
+                        
+                        // Generate QR code
+                        setTimeout(() => {
+                            const canvas = document.getElementById('qrcode');
+                            if (canvas) {
+                                QRCode.toCanvas(canvas, data.payment_request, {
+                                    width: 280,
+                                    margin: 2,
+                                    color: {
+                                        dark: '#000000',
+                                        light: '#ffffff'
+                                    }
+                                }, function(error) {
+                                    if (error) console.error('QR Error:', error);
+                                });
+                            }
+                        }, 100);
+                        
+                        // Start checking payment status
+                        checkPaymentStatus(data.payment_hash);
+                    }
+                } catch (error) {
+                    console.error('Checkout error:', error);
+                    alert('❌ Cannot connect to ByteCode payment server. Make sure backend is running on port 5000!');
+                }
+            };
+
+            const checkPaymentStatus = (paymentHash) => {
+                const interval = setInterval(async () => {
+                    try {
+                        const response = await fetch(`${API_BASE}/api/lightning/check/${paymentHash}`);
+                        const data = await response.json();
+                        
+                        if (data.success && data.settled) {
+                            clearInterval(interval);
+                            
+                            // Show success message
+                            const successSound = new Audio('data:audio/wav;base64,U3RlZmFuIHRoZSBTb3VuZCBvZiBTdWNjZXNz');
+                            successSound.play().catch(e => {});
+                            
+                            alert('✅⚡ PAYMENT RECEIVED! Thank you for shopping with ByteCode!');
+                            
+                            // Record transaction for credit score
+                            const transactions = JSON.parse(localStorage.getItem('bytecode_transactions') || '[]');
+                            transactions.push({
+                                hash: paymentHash,
+                                amount: total,
+                                date: new Date().toISOString(),
+                                status: 'completed',
+                                business: BUSINESS_NAME
+                            });
+                            localStorage.setItem('bytecode_transactions', JSON.stringify(transactions));
+                            
+                            // Clear cart
+                            setCart([]);
+                            setShowQR(false);
+                            
+                            // Update credit score
+                            setCreditScore(Math.min(100, transactions.length * 10));
+                            
+                            // Refresh balances
+                            checkBackendHealth();
+                        }
+                    } catch (error) {
+                        console.error('Error checking payment:', error);
+                    }
+                }, 2000); // Check every 2 seconds
+            };
+
+            const clearCart = () => {
+                setCart([]);
+            };
+
+            return (
+                <div className="fade-in container mx-auto px-4 py-6 max-w-7xl">
+                    {/* Status Bar */}
+                    {backendStatus === 'offline' && (
+                        <div className="bg-red-600 text-white p-4 rounded-xl mb-4 flex justify-between items-center">
+                            <span>⚠️ Backend server is not running. Flask app must be started first!</span>
+                            <button 
+                                onClick={checkBackendHealth}
+                                className="bg-white text-red-600 px-4 py-2 rounded-lg font-bold"
+                            >
+                                Retry Connection
+                            </button>
+                        </div>
+                    )}
+                    
+                    {/* Navbar */}
+                    <nav className="flex flex-wrap justify-between items-center p-4 bg-slate-900/80 backdrop-blur-lg rounded-2xl shadow-xl mb-8 border border-slate-700">
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-3xl font-bold text-yellow-400">⚡ ByteCode</h1>
+                            {backendStatus === 'online' ? (
+                                <span className="bg-green-600 text-xs px-2 py-1 rounded-full">● LIVE</span>
+                            ) : (
+                                <span className="bg-red-600 text-xs px-2 py-1 rounded-full">● OFFLINE</span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <span className="badge bg-info text-white px-3 py-2 rounded-full">
+                                💳 Credit: {creditScore}
+                            </span>
+                            <span className="badge bg-purple-600 text-white px-3 py-2 rounded-full">
+                                ⚡ {(channelBalance / 1000).toFixed(0)}K sats
+                            </span>
+                            <button 
+                                onClick={() => setShowRegister(true)}
+                                className="btn btn-warning rounded-full px-4"
+                            >
+                                Register
+                            </button>
+                            <span className="badge bg-success text-white px-4 py-2 rounded-full text-lg">
+                                🛒 {cart.length} {cart.length === 1 ? 'item' : 'items'}
+                            </span>
+                            {cart.length > 0 && (
+                                <button 
+                                    onClick={clearCart}
+                                    className="btn btn-outline-danger btn-sm rounded-full"
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
+                    </nav>
+
+                    {/* Hero Section */}
+                    <div className="text-center py-8 md:py-12">
+                        <h2 className="text-4xl md:text-6xl font-bold mb-4 text-white bg-clip-text text-transparent bg-gradient-to-r from-yellow-400 to-yellow-600">
+                            ByteCode Lightning Store
+                        </h2>
+                        <p className="text-gray-300 text-lg md:text-xl">
+                            ⚡ Instant Payments • Zero Fees • Global • Bitcoin Lightning Network
+                        </p>
+                        {backendStatus === 'online' && (
+                            <p className="text-green-400 mt-2">
+                                ✅ Backend Connected • Ready to accept payments
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Products Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+                        {products.map((product) => (
+                            <div key={product.id} className="card-bg-dark">
+                                <div className="text-center flex flex-col h-full">
+                                    <div className="text-5xl mb-3">{product.name.split(' ')[0]}</div>
+                                    <h5 className="text-xl font-bold text-white mb-2">
+                                        {product.name}
+                                    </h5>
+                                    <p className="text-gray-400 text-sm mb-3">{product.desc}</p>
+                                    <p className="text-3xl font-bold text-yellow-400 mb-2">
+                                        {product.price.toLocaleString()} sats
+                                    </p>
+                                    <p className="text-gray-400 mb-4">
+                                        ~${product.price_usd} USD
+                                    </p>
+                                    <div className="mt-auto">
+                                        <button 
+                                            onClick={(e) => addToCart(product, e)}
+                                            className="btn btn-outline-warning w-full rounded-full py-2 btn-glow"
+                                        >
+                                            Add to Cart
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Shopping Cart */}
+                    {cart.length > 0 && (
+                        <div className="bg-slate-800/80 backdrop-blur-lg rounded-2xl p-6 mb-8 border border-slate-700">
+                            <h3 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+                                🛒 Your Cart
+                                <span className="bg-yellow-400 text-black px-3 py-1 rounded-full text-sm">
+                                    {cart.length} items
+                                </span>
+                            </h3>
+                            <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                                {cart.map((item, index) => (
+                                    <div key={index} className="flex justify-between items-center bg-slate-700/50 p-3 rounded-xl">
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-2xl">{item.name.split(' ')[0]}</span>
+                                            <div>
+                                                <span className="text-white font-medium">{item.name}</span>
+                                                <span className="text-gray-400 text-sm block">{item.desc}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                            <span className="text-yellow-400 font-bold">
+                                                {item.price.toLocaleString()} sats
+                                            </span>
+                                            <button 
+                                                onClick={() => removeFromCart(index)}
+                                                className="btn btn-sm btn-danger rounded-full w-8 h-8 flex items-center justify-center p-0"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            
+                            {/* Totals */}
+                            <div className="flex flex-col items-end mt-6 pt-4 border-t border-slate-600">
+                                <div className="text-xl text-gray-300 mb-2">
+                                    Subtotal: <span className="text-white">{total.toLocaleString()} sats</span>
+                                </div>
+                                <div className="text-3xl font-bold text-yellow-400 mb-2">
+                                    Total: {total.toLocaleString()} sats
+                                </div>
+                                <div className="text-gray-400 mb-4">
+                                    ~${totalUSD.toFixed(2)} USD
+                                </div>
+                                <button 
+                                    onClick={checkout}
+                                    disabled={backendStatus !== 'online'}
+                                    className={`btn btn-success w-full md:w-96 py-3 text-lg font-bold rounded-full btn-glow ${backendStatus !== 'online' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    ⚡ Pay with Lightning ⚡
+                                </button>
+                                {backendStatus !== 'online' && (
+                                    <p className="text-red-400 text-sm mt-2">
+                                        Start Flask backend to enable payments
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* QR Code Modal */}
+                    {showQR && (
+                        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-slate-800 p-8 rounded-3xl shadow-2xl text-center max-w-md w-full border border-yellow-400/30">
+                                <div className="w-16 h-16 bg-yellow-400/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <span className="text-4xl">⚡</span>
+                                </div>
+                                <h3 className="text-2xl font-bold text-yellow-400 mb-2">
+                                    Scan to Pay
+                                </h3>
+                                <p className="text-gray-400 mb-6">ByteCode Lightning Invoice</p>
+                                
+                                <div className="qr-container mx-auto mb-6 shadow-xl">
+                                    <canvas id="qrcode" width="280" height="280"></canvas>
+                                </div>
+                                
+                                <p className="text-2xl font-bold text-white mb-2">
+                                    {total.toLocaleString()} sats
+                                </p>
+                                <p className="text-gray-400 mb-4">
+                                    ~${totalUSD.toFixed(2)} USD
+                                </p>
+                                
+                                <div className="bg-slate-700/50 p-4 rounded-xl mb-6">
+                                    <p className="text-xs text-gray-400 break-all font-mono">
+                                        {invoice?.substring(0, 30)}...
+                                    </p>
+                                </div>
+                                
+                                <div className="flex gap-3">
+                                    <button 
+                                        onClick={() => setShowQR(false)}
+                                        className="btn btn-outline-secondary flex-1 rounded-full py-2"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(invoice);
+                                            alert('✅ Invoice copied to clipboard!');
+                                        }}
+                                        className="btn btn-outline-info flex-1 rounded-full py-2"
+                                    >
+                                        Copy Invoice
+                                    </button>
+                                </div>
+                                
+                                <p className="text-xs text-gray-500 mt-4">
+                                    ⚡ Waiting for payment... The page will update automatically
+                                </p>
+                                <div className="flex justify-center mt-2">
+                                    <div className="loading-spinner"></div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Register Modal */}
+                    {showRegister && (
+                        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                            <div className="bg-slate-800 p-8 rounded-3xl shadow-2xl max-w-md w-full border border-blue-400/30">
+                                <div className="w-16 h-16 bg-blue-400/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <span className="text-4xl">🏢</span>
+                                </div>
+                                <h3 className="text-2xl font-bold text-blue-400 mb-6 text-center">
+                                    Register with ByteCode
+                                </h3>
+                                <input 
+                                    type="text" 
+                                    placeholder="Business Name" 
+                                    className="form-control mb-3 bg-slate-700 text-white border-slate-600 rounded-xl py-3"
+                                />
+                                <input 
+                                    type="email" 
+                                    placeholder="Email Address" 
+                                    className="form-control mb-3 bg-slate-700 text-white border-slate-600 rounded-xl py-3"
+                                />
+                                <input 
+                                    type="text" 
+                                    placeholder="Phone Number" 
+                                    className="form-control mb-4 bg-slate-700 text-white border-slate-600 rounded-xl py-3"
+                                />
+                                <div className="flex gap-3">
+                                    <button className="btn btn-success flex-1 rounded-full py-3 font-bold">
+                                        Register
+                                    </button>
+                                    <button 
+                                        onClick={() => setShowRegister(false)}
+                                        className="btn btn-outline-secondary flex-1 rounded-full py-3"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-500 text-center mt-4">
+                                    By registering, you agree to ByteCode's Terms of Service
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Footer */}
+                    <footer className="text-center text-gray-400 mt-16 pt-8 border-t border-slate-700/50">
+                        <div className="flex flex-wrap justify-center gap-6 mb-4">
+                            <span>⚡ Bitcoin Lightning Network</span>
+                            <span>•</span>
+                            <span>🟢 Regtest Mode</span>
+                            <span>•</span>
+                            <span>🏢 ByteCode Business</span>
+                        </div>
+                        <p className="text-sm">
+                            © 2026 ByteCode Lightning Store. All payments processed instantly via LND.
+                        </p>
+                        <p className="text-xs mt-2 text-gray-500">
+                            Backend: Flask | Lightning: LND | Bitcoin: Regtest | Channel: {channelBalance.toLocaleString()} sats
+                        </p>
+                    </footer>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
