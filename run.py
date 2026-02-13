@@ -1,4 +1,13 @@
-from waitress import serve
-from app import app
+import requests
+import json
 
-serve(app, host='0.0.0.0', port=5000)
+def rpc(method, params=None, wallet=None):
+    """Connect to Bitcoin Core RPC"""
+    
+    # Base URL for Bitcoin Core
+    if wallet:
+        # For wallet-specific commands
+        url = f"http://127.0.0.1:18443/wallet/{wallet}"
+    else:
+        # For general commands
+        url = "http://127.0.0.1:18443/"
