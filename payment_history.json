@@ -1,0 +1,19 @@
+{
+  "payments": [
+    {
+      "txid": "59054103693197abf30563cb27702838683f971a7623f22916f94ea5036b32e7",
+      "amount": 50.0,
+      "time": "2026-02-13 04:31:46",
+      "address": "bcrt1qx0j8xggkang0cssaprq7xs9pt3mkah7j6muqd4",
+      "confirmations": 100
+    },
+    {
+      "txid": "2f6ded5eb51e25560f410484e8a4d9c4bf72206bc0a627c47fb2c8c19f09be17",
+      "amount": 50.0,
+      "time": "2026-02-13 04:31:47",
+      "address": "bcrt1qx0j8xggkang0cssaprq7xs9pt3mkah7j6muqd4",
+      "confirmations": 100
+    }
+  ],
+  "total_received": 100.0
+}

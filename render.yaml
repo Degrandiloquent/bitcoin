@@ -1,0 +1,6 @@
+service:
+type: web
+name:bytecode-backend
+runtime: python
+buildcommand: "pip install -r reqirements.txt"
+startcommand:"gunicorn app:app"
